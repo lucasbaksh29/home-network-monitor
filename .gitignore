@@ -1,0 +1,6 @@
+# Local readings + device history — never commit (holds your real device list)
+readings.db
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,7 @@
+{
+  "devices": [
+    {"name": "Router", "host": "192.168.1.1"},
+    {"name": "Laptop", "host": "192.168.1.2"},
+    {"name": "Phone", "host": "192.168.1.3"}
+  ]
+}

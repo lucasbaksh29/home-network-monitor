@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="30">
+<title>mini-NOC — Home Network Monitor</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 40px; color: #111; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: #555; font-size: 13px; margin-bottom: 20px; }
+  table { border-collapse: collapse; width: 100%; max-width: 760px; }
+  th, td { border-bottom: 1px solid #ddd; padding: 10px 8px; text-align: left; }
+  th { font-size: 12px; text-transform: uppercase; color: #555; }
+  .pill { display: inline-block; padding: 3px 10px; border-radius: 12px;
+          font-weight: bold; font-size: 13px; color: #fff; }
+  .up { background: #2e9e4f; }
+  .down { background: #c0392b; }
+  .none { background: #888; }
+</style>
+</head>
+<body>
+<h1>mini-NOC — Home Network Monitor</h1>
+<div class="sub">Last updated {{ now }} — refreshes every 30 seconds. Run <code>python monitor.py</code> to take fresh readings.</div>
+<table>
+  <tr><th>Device</th><th>Host</th><th>Status</th><th>Latency</th><th>Uptime (24h)</th><th>Last seen</th></tr>
+  {% for d in devices %}
+  <tr>
+    <td>{{ d.name }}</td>
+    <td>{{ d.host }}</td>
+    <td>
+      {% if d.up is true %}<span class="pill up">UP</span>
+      {% elif d.up is false %}<span class="pill down">DOWN</span>
+      {% else %}<span class="pill none">NO DATA</span>{% endif %}
+    </td>
+    <td>{% if d.latency is not none %}{{ "%.1f"|format(d.latency) }} ms{% else %}—{% endif %}</td>
+    <td>{% if d.uptime is not none %}{{ "%.0f"|format(d.uptime) }}%{% else %}—{% endif %}</td>
+    <td>{{ d.last_seen or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Recent events</h2>
+{% if events %}
+<table>
+  <tr><th>Time</th><th>Device</th><th>Event</th></tr>
+  {% for e in events %}
+  <tr>
+    <td>{{ e.ts }}</td>
+    <td>{{ e.device }} ({{ e.host }})</td>
+    <td>{% if e.event == "down" %}<span class="pill down">WENT DOWN</span>{% else %}<span class="pill up">CAME BACK</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p>No down/up events recorded yet. Events appear when a device changes state between passes.</p>
+{% endif %}
+</body>
+</html>
