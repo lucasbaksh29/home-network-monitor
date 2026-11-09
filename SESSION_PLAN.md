@@ -88,3 +88,24 @@ Goal: someone hiring can look at this and understand it in two minutes.
 
 Done when: the repo is public, the README explains it with
 screenshots, and a stranger could clone it and run Session 1.
+
+---
+
+## Extensions (Sessions 6–9) — added Nov 8, 2026
+
+The five sessions above are done and the project is public on GitHub.
+Four upgrades, built one at a time in this order:
+
+- **Session 6 — Internet health check.** Ping two public DNS servers
+  (8.8.8.8, 1.1.1.1) every pass. Dashboard gets an Internet section
+  with an UP / DEGRADED / DOWN banner, so internet-down is easy to
+  tell apart from device-down. (`app.py` + `templates/index.html`;
+  `monitor.py` unchanged.)
+- **Session 7 — Port checks.** Check TCP ports as well as ping, so the
+  dashboard shows whether a *service* is up (router admin page,
+  printer, game server), not just whether the device answers.
+- **Session 8 — Latency graphs.** A latency-over-time chart per device
+  on the dashboard, so a flaky connection shows up before it drops.
+- **Session 9 — Email alerts.** The watch loop sends an email when a
+  device goes down or comes back, so the dashboard does not have to
+  be watched.

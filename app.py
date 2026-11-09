@@ -1,7 +1,17 @@
-"""mini-NOC: home network monitor — Session 3: web dashboard.
+"""mini-NOC: home network monitor — Session 3 + 6 + 7: web dashboard.
 
 Reads devices.json and readings.db and serves a live status page at
 http://localhost:5000
+
+Session 6 adds an Internet section: devices in devices.json with
+"group": "internet" (public DNS servers) are shown separately from
+the home network, with an overall Internet UP / DEGRADED / DOWN
+banner, so you can tell "the internet is down" apart from "a device
+in my house is down" at a glance.
+
+Session 7 adds a Port column: devices with a "port" in devices.json
+show whether that TCP service answered (e.g. the router admin page
+on port 80), and port_down / port_up events appear in Recent events.
 
 Run it:
     pip install -r requirements.txt   # first time only (Flask)
@@ -10,7 +20,7 @@ Run it:
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import Flask, render_template
@@ -30,19 +40,28 @@ def latest_readings():
     """Most recent reading per device.
 
     Returns {device_name: {"host": ..., "ts": ..., "up": bool,
-    "latency": float | None}}. Empty if no readings exist yet.
+    "latency": float | None, "port": int | None,
+    "port_up": bool | None}}. Empty if no readings exist yet.
     """
     if not DB_PATH.exists():
         return {}
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
-        "SELECT device, host, ts, up, latency_ms FROM readings ORDER BY id DESC"
+        "SELECT device, host, ts, up, latency_ms, port, port_up"
+        " FROM readings ORDER BY id DESC"
     ).fetchall()
     conn.close()
     latest = {}
-    for device, host, ts, up, latency in rows:
+    for device, host, ts, up, latency, port, port_up in rows:
         if device not in latest:
-            latest[device] = {"host": host, "ts": ts, "up": bool(up), "latency": latency}
+            latest[device] = {
+                "host": host,
+                "ts": ts,
+                "up": bool(up),
+                "latency": latency,
+                "port": port,
+                "port_up": None if port_up is None else bool(port_up),
+            }
     return latest
 
 
@@ -53,8 +72,6 @@ def uptime(device, hours=24):
     """
     if not DB_PATH.exists():
         return None
-    from datetime import timedelta
-
     conn = sqlite3.connect(DB_PATH)
     since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
     rows = conn.execute(
@@ -64,6 +81,24 @@ def uptime(device, hours=24):
     if not rows:
         return None
     return sum(row[0] for row in rows) / len(rows) * 100
+
+
+def internet_status(internet):
+    """Overall internet state from the internet hosts.
+
+    Returns {"label": ..., "cls": ...} where cls is a pill class:
+    "up" (all reachable), "warn" (some reachable), "down" (none),
+    "none" (no readings yet).
+    """
+    readings = [d for d in internet if d["up"] is not None]
+    if not readings:
+        return {"label": "NO DATA", "cls": "none"}
+    up = sum(1 for d in readings if d["up"])
+    if up == len(readings):
+        return {"label": "UP", "cls": "up"}
+    if up > 0:
+        return {"label": f"DEGRADED — {up} of {len(readings)} reachable", "cls": "warn"}
+    return {"label": "DOWN — check your connection", "cls": "down"}
 
 
 def recent_events(limit=10):
@@ -103,15 +138,23 @@ def index():
             {
                 "name": device["name"],
                 "host": device["host"],
+                # Devices without a "group" are home devices.
+                "group": device.get("group", "home"),
                 "up": reading["up"] if reading else None,
                 "latency": reading["latency"] if reading else None,
+                "port": device.get("port"),
+                "port_up": reading["port_up"] if reading else None,
                 "last_seen": reading["ts"] if reading else None,
                 "uptime": uptime(device["name"]),
             }
         )
+    internet = [d for d in status if d["group"] == "internet"]
+    home = [d for d in status if d["group"] != "internet"]
     return render_template(
         "index.html",
-        devices=status,
+        internet=internet,
+        home=home,
+        inet=internet_status(internet),
         events=recent_events(),
         now=datetime.now().strftime("%H:%M:%S"),
     )
