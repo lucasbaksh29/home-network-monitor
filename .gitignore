@@ -1,5 +1,7 @@
 # Local readings + device history — never commit (holds your real device list)
 readings.db
+# Email alert settings — never commit (holds your Gmail app password)
+alerts.json
 __pycache__/
 *.pyc
 .venv/

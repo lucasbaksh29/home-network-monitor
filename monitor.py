@@ -1,4 +1,4 @@
-"""mini-NOC: home network monitor — Sessions 1 + 4 + 7.
+"""mini-NOC: home network monitor — Sessions 1 + 4 + 7 + 9.
 
 Pings every device listed in devices.json, records the result in
 SQLite (readings.db), logs UP/DOWN changes to the events table,
@@ -12,24 +12,36 @@ just whether the device is alive. Port changes are logged as
 port_down / port_up events. A port is only checked while the device
 is up — if the ping fails, the port state is unknown, not down.
 
+Session 9 adds email alerts: when a pass logs any down/up or
+port_down/port_up events, the monitor sends one email listing them,
+using the settings in alerts.json (Gmail SMTP + app password).
+alerts.json is local-only and gitignored — it holds the password,
+so it must never be committed. Without alerts.json the monitor
+just does not send mail. Run `python monitor.py --test-alert` to
+send a test email and check the setup works.
+
 Run it:
     python monitor.py            # one pass
     python monitor.py --watch    # repeat every 60 seconds until Ctrl+C
+    python monitor.py --test-alert  # send a test email, then exit
 """
 
 import json
 import platform
 import re
+import smtplib
 import socket
 import sqlite3
 import subprocess
 import sys
 import time
 from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
 
 HERE = Path(__file__).parent
 DB_PATH = HERE / "readings.db"
+ALERTS_CONFIG = HERE / "alerts.json"
 INTERVAL_SECONDS = 60
 PORT_TIMEOUT_SECONDS = 2
 
@@ -99,6 +111,80 @@ def init_db():
     return conn
 
 
+def load_alert_config():
+    """Alert settings from alerts.json, or None if the file is absent.
+
+    The file is local-only (gitignored) because it holds the Gmail
+    app password. Without it the monitor just does not send mail.
+    """
+    if not ALERTS_CONFIG.exists():
+        return None
+    with open(ALERTS_CONFIG) as f:
+        return json.load(f)
+
+
+EVENT_LABELS = {
+    "down": "went DOWN",
+    "up": "came back",
+    "port_down": "service went DOWN",
+    "port_up": "service came back",
+}
+
+
+def send_alert(config, events, now, test=False):
+    """Send one email listing the events from this pass.
+
+    events: [(device, event)] where event is down/up/port_down/
+    port_up. Returns True if sent, False if there was nothing to
+    send or sending failed. A failed send never crashes the monitor.
+    """
+    if not events and not test:
+        return False
+    if test:
+        subject = "mini-NOC test alert"
+        body = (
+            "This is a test email from your home network monitor.\n\n"
+            "If you got this, your email alerts are working — the monitor "
+            "will email you when a device goes down or comes back.\n\n"
+            "Dashboard: http://localhost:5000"
+        )
+    else:
+        lines = [
+            f"- {name} {EVENT_LABELS.get(event, event)} at {now}"
+            for name, event in events
+        ]
+        subject = (
+            f"mini-NOC alert: {events[0][0]} "
+            f"{EVENT_LABELS.get(events[0][1], events[0][1])}"
+        )
+        if len(events) > 1:
+            subject = f"mini-NOC alert: {len(events)} device changes"
+        body = (
+            "Home network monitor events:\n\n"
+            + "\n".join(lines)
+            + "\n\nDashboard: http://localhost:5000"
+        )
+    msg = EmailMessage()
+    msg["From"] = config["from"]
+    msg["To"] = config["to"]
+    msg["Subject"] = subject
+    msg.set_content(body)
+    try:
+        with smtplib.SMTP(
+            config.get("smtp_server", "smtp.gmail.com"),
+            config.get("smtp_port", 587),
+            timeout=15,
+        ) as server:
+            server.starttls()
+            server.login(config["from"], config["password"])
+            server.send_message(msg)
+        print(f"  ALERT SENT: {subject}")
+        return True
+    except (OSError, smtplib.SMTPException) as exc:
+        print(f"  ALERT FAILED: {exc}")
+        return False
+
+
 def last_statuses(conn):
     """Most recent UP/DOWN per device: {device: 0/1}."""
     rows = conn.execute("SELECT device, up FROM readings ORDER BY id DESC").fetchall()
@@ -125,7 +211,7 @@ def last_port_statuses(conn):
     return statuses
 
 
-def run_pass(conn):
+def run_pass(conn, alert_config=None):
     devices = load_devices()
     now = datetime.now().isoformat(timespec="seconds")
     previous = last_statuses(conn)
@@ -180,15 +266,32 @@ def run_pass(conn):
     conn.commit()
     for name, event in events:
         print(f"  EVENT: {name} went {event.upper()} at {now}")
+    if alert_config is not None:
+        send_alert(alert_config, events, now)
     print(f"Saved {len(devices)} reading(s) to {DB_PATH.name}")
 
 
 def main():
+    if "--test-alert" in sys.argv:
+        config = load_alert_config()
+        if config is None:
+            print(
+                "No alerts.json found. Copy alerts.example.json to"
+                " alerts.json and fill in your Gmail app password first."
+            )
+            return
+        send_alert(
+            config, [], datetime.now().isoformat(timespec="seconds"), test=True
+        )
+        return
     conn = init_db()
+    alert_config = load_alert_config()
+    if alert_config is None:
+        print("No alerts.json — email alerts off (see alerts.example.json).")
     watch = "--watch" in sys.argv
     try:
         while True:
-            run_pass(conn)
+            run_pass(conn, alert_config)
             if not watch:
                 break
             print(f"\nNext pass in {INTERVAL_SECONDS}s (Ctrl+C to stop)\n")
