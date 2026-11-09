@@ -13,6 +13,11 @@ Session 7 adds a Port column: devices with a "port" in devices.json
 show whether that TCP service answered (e.g. the router admin page
 on port 80), and port_down / port_up events appear in Recent events.
 
+Session 8 adds a latency history chart: a /api/history endpoint
+returns recent latency readings for a device, and the dashboard
+draws them as a line chart (Chart.js) with a device picker and a
+time range, so a flaky connection shows up before it drops.
+
 Run it:
     pip install -r requirements.txt   # first time only (Flask)
     python app.py
@@ -23,7 +28,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from flask import Flask, render_template
+from flask import Flask, jsonify, render_template, request
 
 HERE = Path(__file__).parent
 DB_PATH = HERE / "readings.db"
@@ -158,6 +163,37 @@ def index():
         events=recent_events(),
         now=datetime.now().strftime("%H:%M:%S"),
     )
+
+
+@app.route("/api/history")
+def history():
+    """Latency history for one device, as JSON.
+
+    Query params: device (name), hours (default 24, clamped 1-168).
+    Returns [{"ts": ..., "latency": ...}] in time order, most recent
+    1000 readings at most. Only UP readings with a latency are
+    included — a device that is down has no latency to plot.
+    """
+    device = request.args.get("device", "")
+    try:
+        hours = float(request.args.get("hours", "24"))
+    except ValueError:
+        hours = 24
+    hours = max(1, min(hours, 168))
+    if not DB_PATH.exists():
+        return jsonify([])
+    conn = sqlite3.connect(DB_PATH)
+    since = (datetime.now() - timedelta(hours=hours)).isoformat(timespec="seconds")
+    rows = conn.execute(
+        "SELECT ts, latency_ms FROM ("
+        "  SELECT ts, latency_ms FROM readings"
+        "  WHERE device = ? AND ts >= ? AND up = 1 AND latency_ms IS NOT NULL"
+        "  ORDER BY ts DESC LIMIT 1000"
+        ") ORDER BY ts ASC",
+        (device, since),
+    ).fetchall()
+    conn.close()
+    return jsonify([{"ts": ts, "latency": latency} for ts, latency in rows])
 
 
 if __name__ == "__main__":

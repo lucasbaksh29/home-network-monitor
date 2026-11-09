@@ -19,7 +19,10 @@
   .down { background: #c0392b; }
   .warn { background: #d98c00; }
   .none { background: #888; }
+  select { font-size: 14px; padding: 4px 6px; margin-right: 8px; }
+  #latency-chart { max-width: 760px; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <h1>mini-NOC — Home Network Monitor</h1>
@@ -78,5 +81,65 @@
 {% else %}
 <p>No down/up events recorded yet. Events appear when a device changes state between passes.</p>
 {% endif %}
+
+<h2>Latency history</h2>
+<div>
+  <select id="device-select">
+    <optgroup label="Internet">
+    {% for d in internet %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+    </optgroup>
+    <optgroup label="Home network">
+    {% for d in home %}<option value="{{ d.name }}">{{ d.name }}</option>{% endfor %}
+    </optgroup>
+  </select>
+  <select id="hours-select">
+    <option value="1">Last hour</option>
+    <option value="6" selected>Last 6 hours</option>
+    <option value="24">Last 24 hours</option>
+  </select>
+</div>
+<canvas id="latency-chart" width="760" height="220"></canvas>
+<p id="chart-status" class="sub"></p>
+<script>
+let chart = null;
+const deviceSelect = document.getElementById('device-select');
+const hoursSelect = document.getElementById('hours-select');
+// Remember the picker's choice across the page's 30-second refreshes.
+const savedDevice = localStorage.getItem('latencyDevice');
+const savedHours = localStorage.getItem('latencyHours');
+if (savedDevice && [...deviceSelect.options].some(o => o.value === savedDevice)) {
+  deviceSelect.value = savedDevice;
+} else if ([...deviceSelect.options].some(o => o.value === 'Router')) {
+  deviceSelect.value = 'Router';
+}
+if (savedHours) hoursSelect.value = savedHours;
+async function loadHistory() {
+  localStorage.setItem('latencyDevice', deviceSelect.value);
+  localStorage.setItem('latencyHours', hoursSelect.value);
+  const resp = await fetch(`/api/history?device=${encodeURIComponent(deviceSelect.value)}&hours=${hoursSelect.value}`);
+  const data = await resp.json();
+  const status = document.getElementById('chart-status');
+  if (!data.length) {
+    status.textContent = 'No latency data for this device in the selected period.';
+    if (chart) { chart.destroy(); chart = null; }
+    return;
+  }
+  status.textContent = '';
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('latency-chart'), {
+    type: 'line',
+    data: {
+      labels: data.map(p => p.ts.slice(11, 16)),
+      datasets: [{ label: deviceSelect.value + ' latency (ms)', data: data.map(p => p.latency),
+                   borderColor: '#2e9e4f', tension: 0.2, pointRadius: 0 }]
+    },
+    options: { responsive: true,
+      scales: { y: { beginAtZero: true, title: { display: true, text: 'ms' } } } }
+  });
+}
+deviceSelect.addEventListener('change', loadHistory);
+hoursSelect.addEventListener('change', loadHistory);
+loadHistory();
+</script>
 </body>
 </html>
